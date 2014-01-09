@@ -1,0 +1,304 @@
+ +---------------------------+
+		    |		CS 521	|
+		    | 	|
+		    |	   DESIGN DOCUMENT	|
+		    +---------------------------+
+
+---- GROUP ----
+
+SENTHIL RAJENDRAN <sr246@buffalo.edu>  (UB no: 50098102)
+
+
+			PAGE TABLE MANAGEMENT
+			=====================
+
+---- DATA STRUCTURES ----
+
+struct page 
+  {
+    void *addr; 
+    bool read_only;
+    struct thread *thread;
+    struct hash_elem hash_elem;
+    struct frame *frame;  
+    block_sector_t sector;
+    bool iswrite;
+       
+  };
+
+void *addr- is used to store the user virtual address 
+
+read_only - if true it says the page is only readable
+
+thread *thread - the owning thread for the particular page
+
+hash_elem - it is the struct thread pages hash element
+
+struct frame *frame- Set only in owning process context with frame->frame_lock held.
+                      Cleared only with scan_lock and frame->frame_lock held.
+
+
+block_sector_t sector- starting sector of the swap area.
+
+iswrite - to check whether a particular file is memory mapped or not.
+
+---- ALGORITHMS ----
+
+>> A2: In a few paragraphs, describe your code for locating the frame, if any, that contains the data of a given page.
+
+
+  Each page structure has a structure frame member, which is a frame that contains the given page in the 
+physical memory. whenever a system page faults on a process we can check the hash table of that process to see if the page
+has been brought to physical memory.
+
+
+
+
+>> A3: How does your code coordinate accessed and dirty bits between
+>> kernel and user virtual addresses that alias a single frame, or
+>> alternatively how do you avoid the issue?
+
+        They can be coordinated by using the lock which is local to a particular
+frame. only one user process can hold that at time, which checks for particular pages
+accessed and dirty bits and solves the issue.
+
+
+
+
+
+
+
+---- SYNCHRONIZATION ----
+
+>> A4: When two user processes both need a new frame at the same time,
+    how are races avoided?
+
+      In order to access a frame a user process need to acquire two locks one is scan_lock (which is a global lock)
+ and one more lock local to particular lock. the scan_lock allows only one process to create a new frame, this avoids the 
+ race condition. Also there is one more lock which can be held by only one process at a time. so these two locks are used to avoid the 
+ race condition.
+
+---- RATIONALE ----
+
+>> A5: Why did you choose the data structure(s) that you did for
+>> representing virtual-to-physical mappings?
+
+        To map from virtual to physical address space the struct and hash table has been used.
+the struct can be very convenient has it can have a another struct member inside the struct. and 
+hash table will also gives a bigger advantage interms of query.
+
+
+
+		       PAGING TO AND FROM DISK
+		       =======================
+
+---- DATA STRUCTURES ----
+
+>> B1: Copy here the declaration of each new or changed `struct' or
+>> `struct' member, global or static variable, `typedef', or
+>> enumeration.  Identify the purpose of each in 25 words or less.
+
+      
+     
+static struct block *swap_device;
+
+
+/* which is a block data sructure for swapping*/
+
+static struct bitmap *swap_bitmap;
+
+/* which is a bitmap of data structure for swapping */
+
+static struct lock swap_lock;
+
+/* which is a global lock for swap area*/
+
+---- ALGORITHMS ----
+
+>> B2: When a frame is required but none is free, some frame must be
+>> evicted.  Describe your code for choosing a frame to evict.
+    
+     whenever no frame is free, the to evict a particular frame clock algorithm 
+has been used. in this case if a process can acquire a particular frames lock,
+it checks for whether the frame has been aceessed recently, if it is so it moves on to the next frame
+and if a particular frame was not accessed recently the page_out has been called
+the particular frame is used for that page.
+
+
+
+>> B3: When a process P obtains a frame that was previously used by a
+>> process Q, how do you adjust the page table (and any other data
+>> structures) to reflect the frame Q no longer has?
+
+      the function thread_current which deals with the current working thread
+helps to update the information. the frame lock or page table lock for that 
+process is released and the page is locked for the currently accessing user process
+so by this way we can ensure that the particular frame or page is no longer
+rletaed to process Q.
+
+
+>> B4: Explain your heuristic for deciding whether a page fault for an
+>> invalid virtual address should cause the stack to be extended into
+>> the page that faulted.
+
+
+     this can be checked by subtracting the threads stack pointer from virtual address 
+if it is less than 32 and if the address is in the specified address space 
+then the page fault should have the stack extended.
+
+
+
+
+
+
+---- SYNCHRONIZATION ----
+
+>> B5: Explain the basics of your VM synchronization design.  In
+>> particular, explain how it prevents deadlock.  (Refer to the
+>> textbook for an explanation of the necessary conditions for
+>> deadlock.)
+
+
+     There are always two locks which help us to avoid the deadlock. 
+apart from any global lock which must be obtained before accessing a hash 
+member. there are local locks which is always associated with each member 
+so they help to avoid the deadlock. there is mutual exclusion in shared resources.
+ 
+
+>> B6: A page fault in process P can cause another process Q's frame
+>> to be evicted.  How do you ensure that Q cannot access or modify
+>> the page during the eviction process?  How do you avoid a race
+>> between P evicting Q's frame and Q faulting the page back in?
+
+   the Q process is stopped from accessing any hash member.that is inorder 
+for a process to do any modification it has to obtain the global lock(frametable)
+which is not possible because already the process p holds it.
+
+
+>> B7: Suppose a page fault in process P causes a page to be read from
+>> the file system or swap.  How do you ensure that a second process Q
+>> cannot interfere by e.g. attempting to evict the frame while it is
+>> still being read in?
+   
+
+   There are always two locks which help us to avoid the deadlock. 
+apart from any global lock which must be obtained before accessing a hash 
+member. there are local locks which is always associated with each member 
+so they help to avoid the deadlock. there is mutual exclusion in shared resources.
+   
+
+
+
+
+>> B8: Explain how you handle access to paged-out pages that occur
+>> during system calls.  Do you use page faults to bring in pages (as
+>> in user programs), or do you have a mechanism for "locking" frames
+>> into physical memory, or do you use some other design?  How do you
+>> gracefully handle attempted accesses to invalid virtual addresses?
+
+    First when a frame is locked for a particular address. the address
+ is checked against the fault address. there is a function which obtains
+ the base address of a given memory address.if the returned address is 
+a NULL pointer then the address is a faulty address.
+
+    
+---- RATIONALE ----
+
+>> B9: A single lock for the whole VM system would make
+>> synchronization easy, but limit parallelism.  On the other hand,
+>> using many locks complicates synchronization and raises the
+>> possibility for deadlock but allows for high parallelism.  Explain
+>> where your design falls along this continuum and why you chose to
+>> design it this way.
+
+
+       the design is a midway between these two types as there is a global
+syncronisation also one more lock for each hash element, inorder to possess the
+hash element the thread(process) needs to acquire that lock.
+
+
+			 MEMORY MAPPED FILES
+			 ===================
+
+---- DATA STRUCTURES ----
+
+>> C1: Copy here the declaration of each new or changed `struct' or
+>> `struct' member, global or static variable, `typedef', or
+>> enumeration.  Identify the purpose of each in 25 words or less.
+
+  struct
+{
+  int mapid;
+  struct file *file;
+  void *addr;
+  size_t nopage;
+  struct list_elem elem;
+}
+
+list_elem elem  - which is a list of elements;
+mapid    - is the mapping id of the file.
+file  - represents file
+nopage  - no of mapped pages.
+addr  - which represents the starting address of memory mapping.
+
+
+---- ALGORITHMS ----
+
+>> C2: Describe how memory mapped files integrate into your virtual
+>> memory subsystem.  Explain how the page fault and eviction
+>> processes differ between swap pages and other pages.
+
+     the mapping caused a pointer to be mapped to the virtual address 
+space also to the file. page fault allocates new page.eviction for exit 
+and unmap.
+
+
+
+>> C3: Explain how you determine whether a new file mapping overlaps
+>> any existing segment.
+
+
+    By comparing the addresses in the virtual memory we can achieve this.
+when creating a page. before inserting into hash table using hash_insert
+a check is made there to see if the page is already mapped.
+
+
+---- RATIONALE ----
+
+>> C4: Mappings created with "mmap" have similar semantics to those of
+>> data demand-paged from executables, except that "mmap" mappings are
+>> written back to their original files, not to swap.  This implies
+>> that much of their implementation can be shared.  Explain why your
+>> implementation either does or does not share much of the code for
+>> the two situations.
+
+
+   The code for the two situations are the same almost. the page struct 
+structure maintains the information regarding whether to write or not to write or swap
+which is a bool. while mapping the data structure is checked whether to write or swap. 
+
+
+
+			   SURVEY QUESTIONS
+			   ================
+
+Answering these questions is optional, but it will help us improve the
+course in future quarters.  Feel free to tell us anything you
+want--these questions are just to spur your thoughts.  You may also
+choose to respond anonymously in the course evaluations at the end of
+the quarter.
+
+>> In your opinion, was this assignment, or any one of the three problems
+>> in it, too easy or too hard?  Did it take too long or too little time?
+
+>> Did you find that working on a particular part of the assignment gave
+>> you greater insight into some aspect of OS design?
+
+>> Is there some particular fact or hint we should give students in
+>> future quarters to help them solve the problems?  Conversely, did you
+>> find any of our guidance to be misleading?
+
+>> Do you have any suggestions for the TAs to more effectively assist
+>> students, either for future quarters or the remaining projects?
+
+>> Any other comments?
